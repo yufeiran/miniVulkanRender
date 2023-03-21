@@ -65,6 +65,9 @@ const bool enableValidationLayers = true;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
 
+
+const int OBJECT_INSTANCES=3; //要绘制的物体的数量
+
 extern bool isAutoRotate;
 extern float rotateAng;
 extern glm::mat4 modelMat;
@@ -134,10 +137,13 @@ struct Model {
 };
 
 struct UniformBufferObject {
-	glm::mat4 model;
 	glm::mat4 view;
 	glm::mat4 proj;
 };
+
+struct UboDataDynamic {
+	glm::mat4* model = nullptr;
+}uboDataDynamic;
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 	const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger);
@@ -258,17 +264,22 @@ public:
 
 
 
+	std::vector< void*> uboDataDynamicBuffersMapped;
+	std::vector<VkBuffer>  uboDataDynamicBuffers;
+	std::vector<VkDeviceMemory> uboDataDynamicBufferMemory;
+	size_t dynamicUboAlignment;
+	size_t normalUboAlignment;
+
+	std::vector<VkBuffer>uniformBuffers;
+	std::vector<VkDeviceMemory>uniformBuffersMemory;
+	std::vector<void*>uniformBuffersMapped;
+
 	uint32_t mipLevels;
 	VkImage textureImage;
 	VkDeviceMemory textureImageMemory;
 	VkImageView textureImageView;
 	VkSampler textureSampler;
 
-
-
-	std::vector<VkBuffer>uniformBuffers;
-	std::vector<VkDeviceMemory>uniformBuffersMemory;
-	std::vector<void*>uniformBuffersMapped;
 
 	VkDescriptorPool descriptorPool;
 	std::vector<VkDescriptorSet> descriptorSets;

@@ -1343,7 +1343,15 @@ void miniVulkanRender::createDescriptorSetLayout() {
 	samplerLayoutBinding.pImmutableSamplers = nullptr;
 	samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-	std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding,samplerLayoutBinding };
+	VkDescriptorSetLayoutBinding uboDataDynamicLayoutBinding{};
+	uboDataDynamicLayoutBinding.binding = 2;
+	uboDataDynamicLayoutBinding.descriptorCount = 1;
+	uboDataDynamicLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	uboDataDynamicLayoutBinding.pImmutableSamplers = nullptr;
+	uboDataDynamicLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+
+	std::array<VkDescriptorSetLayoutBinding, 3> bindings = { uboLayoutBinding,samplerLayoutBinding,uboDataDynamicLayoutBinding };
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1356,28 +1364,56 @@ void miniVulkanRender::createDescriptorSetLayout() {
 }
 
 void miniVulkanRender::createUniformBuffers() {
-	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+
+	// Dynamic Uniform
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties);
+	// Calculate required alignment based on minimum device offset alignment
+	size_t minUboAlignment = deviceProperties.limits.minUniformBufferOffsetAlignment;
+	dynamicUboAlignment = sizeof(glm::mat4);
+	if (minUboAlignment > 0) {
+		dynamicUboAlignment = (dynamicUboAlignment + minUboAlignment - 1) & ~(minUboAlignment - 1);
+	}
+
+	size_t bufferSize = OBJECT_INSTANCES * dynamicUboAlignment;
+	uboDataDynamic.model = (glm::mat4*)_aligned_malloc(bufferSize, dynamicUboAlignment);
+
+	uboDataDynamicBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+	//Normal Uniform
+	normalUboAlignment = sizeof(UniformBufferObject);
+
+	if (minUboAlignment > 0) {
+		normalUboAlignment = (normalUboAlignment + minUboAlignment - 1) & ~(minUboAlignment - 1);
+	}
+
+	bufferSize += normalUboAlignment;
 
 	uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 	uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 	uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
+	 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			uniformBuffers[i], uniformBuffersMemory[i]);
 
-		vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+		vkMapMemory(device, uniformBuffersMemory[i], 0, OBJECT_INSTANCES * dynamicUboAlignment, 0, &uboDataDynamicBuffersMapped[i]);
+		vkMapMemory(device, uniformBuffersMemory[i], OBJECT_INSTANCES * dynamicUboAlignment, normalUboAlignment, 0, &uniformBuffersMapped[i]);
 	}
 }
 
 void miniVulkanRender::createDescriptorPool() {
-	std::array<VkDescriptorPoolSize, 2>poolSizes{};
+	std::array<VkDescriptorPoolSize, 3>poolSizes{};
 
 	poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 	poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+	poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
 
 
 	VkDescriptorPoolCreateInfo poolInfo{};
@@ -1418,7 +1454,12 @@ void miniVulkanRender::createDescriptorSets() {
 		imageInfo.imageView = textureImageView;
 		imageInfo.sampler = textureSampler;
 
-		std::array<VkWriteDescriptorSet, 2>descriptorWrites{};
+		VkDescriptorBufferInfo uboDataDynamicBufferInfo = {};
+		uboDataDynamicBufferInfo.buffer = uniformBuffers[i];
+		uboDataDynamicBufferInfo.offset = normalUboAlignment; //？？为什么是dynamic在noraml的后面？
+		uboDataDynamicBufferInfo.range = dynamicUboAlignment;
+
+		std::array<VkWriteDescriptorSet, 3>descriptorWrites{};
 		descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrites[0].dstSet = descriptorSets[i];
 		descriptorWrites[0].dstBinding = 0;
@@ -1436,6 +1477,18 @@ void miniVulkanRender::createDescriptorSets() {
 		descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		descriptorWrites[1].descriptorCount = 1;
 		descriptorWrites[1].pImageInfo = &imageInfo;
+
+		descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrites[2].dstSet = descriptorSets[i];
+		descriptorWrites[2].dstBinding = 2;
+		descriptorWrites[2].dstArrayElement = 0;
+		descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+		descriptorWrites[2].descriptorCount = 1;
+		descriptorWrites[2].pBufferInfo = &uboDataDynamicBufferInfo;
+		descriptorWrites[2].pTexelBufferView = nullptr;
+
+
+
 
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 	}
